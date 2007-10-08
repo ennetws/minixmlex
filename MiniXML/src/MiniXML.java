@@ -47,13 +47,13 @@ class TagSet extends Tag{
 	}
 	
 	public TagSet(StartTag start, Tag elemnt, EndTag end){
-		super("SET");
+		super("");
 		
 		startTag 	= start;
 		element 	= elemnt;
 		endTag 		= end;
 	}
-	
+
 	public String toString(){
 		String temp = "";
 		
@@ -61,18 +61,13 @@ class TagSet extends Tag{
 		if (startTag != null)
 			temp += startTag + "\n";
 		
-		if (element != null){
-			if (element instanceof TagSet)
-			{
-				// Print out the nested tag
-				temp += element.toString()+"\n";
-			}else{
-				
-				// Print out the contents of the element
-				for (int i = 0 ; i < element.name.length();i++){
-					temp += "CHAR\t" + (int)element.name.charAt(i)+"\n";
-				}
+		if (name != null){
+
+			// Print out the contents of the element
+			for (int i = 0 ; i < name.length();i++){
+				temp += "CHAR\t" + (int)name.charAt(i)+" or = "+name.charAt(i)+"\n";
 			}
+			
 		}
 		
 		// Print out the elements in that tag
@@ -81,52 +76,156 @@ class TagSet extends Tag{
 				
 		return temp;
 	}
+	
+	public static boolean isEndTag(Tag s, Tag e){
+		return (s.name.equals(e.name.substring(1)));
+	}
 }
 
 class MiniXMLex {
 
 	public int lineNumber 	= 0;
-	public int tagCount 	= 0;
 	public int errorCount 	= 0;
 
 	public BufferedReader input;
 	public Vector<TagSet> tags = new Vector<TagSet>(); 
 	
 	public String buffer;
+	public StartTag currentStart;
+	
+	public boolean verbose = true;
+	
+	public String output;
 	
 	public MiniXMLex(BufferedReader input) {
 		this.input = input;
+		this.output = "";
 	}
 	
-	public String nextToken(){
+	public int tagCount(){
+		return tags.size() * 2;
+	}
+	
+	public String nextToken(String buf){
 		String token = "";
 		
+		int bufferEnd = buf.length();
 		
+		boolean isTag = false;
+		
+		int i = 0;
+		
+		//Skip white space
+		while(buf.charAt(i) == ' ')
+			i++;
+		
+		for (; i < bufferEnd ; i++){
+			char c = buf.charAt(i);
+			
+			if (c == '<'){
+				
+				isTag = true;
+				
+				if (token.length() > 0 || currentStart != null)
+				{
+					// End tag
+					if (buf.charAt(i+1) == '/')
+					{
+						buffer = buffer.substring(buffer.indexOf('<'));
+						return token;
+					}else{
+						
+						// Nested case					
+						buffer = buffer.substring(i);
+						
+						tags.add(nextTag());
+						
+						i 			= -1;
+						bufferEnd 	-= (buf.length() - buffer.length());
+						buf 		= buffer;
+						isTag 		= false;
+						
+						buffer = buf;
+					}
+				}
+			}
+			else if (c == '>'){
+				break;
+			}
+			else
+			{
+				if (!isTag)
+				{
+					if (verbose)
+						output += "CHAR\t" + (int)c +"\tor = "+ c +"\n";
+					else
+						output += c;
+				}
+				
+				token += c;
+			}
+		}
+
+		buffer = buffer.substring(buffer.indexOf('>')+1);
 		
 		return token;
 	}
 	
-	public String analyise(){
-		String result = "";
+	public TagSet nextTag(){
+		currentStart = null;
 		
+		StartTag 	x = new StartTag(nextToken(buffer));
+		
+		currentStart = x;
+		
+		if(verbose)	
+			output += x +"\n";
+		
+		TagSet 		y = new TagSet(nextToken(buffer));
+		EndTag 		z = new EndTag("");
+
+		currentStart = null;
+		//Check for tags with no contents
+		if (TagSet.isEndTag(x, y))
+		{
+			z = new EndTag(y.name);
+			y = new TagSet("");
+		}else
+		{
+			z = new EndTag(nextToken(buffer));
+		}
+		
+		if(verbose)	
+			output += z +"\n";
+		
+		return new TagSet(x, y, z);
+	}
+
+	public String analyise(){
 		try{
 		
 			while ((buffer = input.readLine()) != null)
 			{
 				lineNumber++;
 				
+				// For each line:
+				while (buffer != null && buffer.length() > 0)
+					tags.add(nextTag());
 				
-				
-				System.out.println("CHAR\t" + (int)('\n'));
+				if(verbose)	
+					output += "CHAR\t" + (int)('\n') +"\n";	
 			}
 			
-			System.out.println("END");
+			if(verbose)	
+				output += "END" +"\n";
+			else
+				output +=  "\n";
 		
 		}catch(IOException e){
 			error("ERROR: in line("+lineNumber+"):"+e.getMessage());
 		}
 		
-		return result;
+		return output;
 	}
 
 	public void error(String message){
