@@ -3,31 +3,43 @@ import java.util.Vector;
 
 class Tag{
 	String name;
-	
 	public Tag(String n){
 		name = n;
 	}
 }
 
 class StartTag extends Tag{
-	
 	public StartTag(String n){
 		super(n);
 	}
-	
 	public String toString(){
 		return "BEGIN\t" + name;
 	}
 }
 
 class EndTag extends Tag{
-	
 	public EndTag(String n){
+		super(n);
+	}
+	public String toString(){
+		return "END\t" + name;
+	}
+}
+
+class WeakTag extends TagSet{
+	public WeakTag(String n){
 		super(n);
 	}
 	
 	public String toString(){
-		return "END\t" + name;
+		String temp ="";
+		
+		/*
+		for (int i = 0 ; i < name.length();i++){
+			temp += "CHAR\t" + (int)name.charAt(i)+" or = "+name.charAt(i)+"\n";
+		}*/
+		
+		return temp;
 	}
 }
 
@@ -35,7 +47,6 @@ class TagSet extends Tag{
 	
 	public StartTag startTag;
 	public EndTag endTag;
-	
 	public Tag element;
 	
 	public TagSet(String n){
@@ -62,12 +73,10 @@ class TagSet extends Tag{
 			temp += startTag + "\n";
 		
 		if (name != null){
-
 			// Print out the contents of the element
 			for (int i = 0 ; i < name.length();i++){
 				temp += "CHAR\t" + (int)name.charAt(i)+" or = "+name.charAt(i)+"\n";
 			}
-			
 		}
 		
 		// Print out the elements in that tag
@@ -78,6 +87,10 @@ class TagSet extends Tag{
 	}
 	
 	public static boolean isEndTag(Tag s, Tag e){
+		if (s.name == null || e.name == null || 
+				s.name.length() != e.name.length())
+			return false;
+			
 		return (s.name.equals(e.name.substring(1)));
 	}
 }
@@ -89,147 +102,284 @@ class MiniXMLex {
 
 	public BufferedReader input;
 	public Vector<TagSet> tags = new Vector<TagSet>(); 
-	
-	public String buffer;
-	public StartTag currentStart;
-	
-	public boolean verbose = true;
-	
 	public String output;
 	
+	public String buffer;
+	public boolean EOF;
+
+	public boolean verbose = true;
+	public int errorCode;
+	public int checkEnd;
+	public String nonTags;
+
 	public MiniXMLex(BufferedReader input) {
 		this.input = input;
 		this.output = "";
+		this.nonTags = "";
+		
+		this.EOF = false;
+		this.checkEnd = 0;
 	}
 	
 	public int tagCount(){
 		return tags.size() * 2;
 	}
 	
-	public String nextToken(String buf){
-		String token = "";
+	public String nextToken(){
+		String token 	= "";
+		errorCode 		= -1;
+		boolean isTag 	= false;
 		
-		int bufferEnd = buf.length();
-		
-		boolean isTag = false;
+		if (buffer == null)
+			return null;
 		
 		int i = 0;
 		
-		//Skip white space
-		while(buf.charAt(i) == ' ')
-			i++;
-		
-		for (; i < bufferEnd ; i++){
-			char c = buf.charAt(i);
+		for (i = 0; i < buffer.length() ; i++){
+			char c = buffer.charAt(i);
 			
 			if (c == '<'){
+				if (i == 0)
+					isTag = true;
 				
-				isTag = true;
-				
-				if (token.length() > 0 || currentStart != null)
+				if (!isTag)
 				{
-					// End tag
-					if (buf.charAt(i+1) == '/')
-					{
-						buffer = buffer.substring(buffer.indexOf('<'));
-						return token;
-					}else{
-						
-						// Nested case					
-						buffer = buffer.substring(i);
-						
-						tags.add(nextTag());
-						
-						i 			= -1;
-						bufferEnd 	-= (buf.length() - buffer.length());
-						buf 		= buffer;
-						isTag 		= false;
-						
-						buffer = buf;
-					}
-				}
-			}
-			else if (c == '>'){
+					int closeTag = buffer.lastIndexOf('>');
+					String nest  = buffer.substring(i,closeTag+1);
+					String temp  = buffer.substring(closeTag+1);
+					
+					tags.add(nextTag(nest));
+					
+					buffer = temp;
+					
+					i = -1;
+				}	
+			}else if (c == '>'){
 				break;
-			}
-			else
-			{
+			}else{
 				if (!isTag)
 				{
 					if (verbose)
 						output += "CHAR\t" + (int)c +"\tor = "+ c +"\n";
 					else
 						output += c;
+				}else{
+					if(c >= '0' && c <= '9')
+						errorCode = 1;	
 				}
 				
 				token += c;
 			}
 		}
-
-		buffer = buffer.substring(buffer.indexOf('>')+1);
+		
+		if (i < buffer.length())
+			buffer = buffer.substring(i+1);
 		
 		return token;
 	}
 	
-	public TagSet nextTag(){
-		currentStart = null;
+	public TagSet nextTag(String buf){
+		buffer = buf;
+		String temp = buffer;
 		
-		StartTag 	x = new StartTag(nextToken(buffer));
-		
-		currentStart = x;
-		
-		if(verbose)	
-			output += x +"\n";
-		
-		TagSet 		y = new TagSet(nextToken(buffer));
-		EndTag 		z = new EndTag("");
+		String tokenStart,tokenMiddle = null, tokenEnd = null;
 
-		currentStart = null;
-		//Check for tags with no contents
-		if (TagSet.isEndTag(x, y))
+		StartTag 	x = null;
+		TagSet 		y = null;
+		EndTag		z = null;
+
+		tokenStart = nextToken();
+		
+		if (errorCode != -1)
+			error();
+
+		if (buffer.indexOf('<') == -1)
 		{
-			z = new EndTag(y.name);
-			y = new TagSet("");
+			buffer = "";
+			
+			if (buf.charAt(0) == '<')
+			output += new StartTag(tokenStart) + "\n";
+			
+			return null;
+		}
+
+		x = new StartTag(tokenStart);
+		
+		output += x + "\n";
+		
+		int hasEndTag = buffer.indexOf("</"+x.name+">");
+		
+		// Safe Case
+		if (hasEndTag > -1)
+		{
+			tokenMiddle = buffer.substring(0,hasEndTag);
+			temp = buffer;
+			y = nextTag(tokenMiddle);
+			buffer = temp.substring(tokenMiddle.length());
+
+			tokenEnd = nextToken();
+			z = new EndTag(tokenEnd);
+			output += z +"\n";
+			
+			return new TagSet(x, y, z);
 		}else
 		{
-			z = new EndTag(nextToken(buffer));
+			error("closing tag missing.");
+			return null;
+		}
+	}
+	
+	public String readMore(){
+		
+		if (this.EOF)
+			return null;
+			
+		String temp = null;
+		
+		try{
+			temp = input.readLine();
+		}catch(IOException e){error(e.getMessage());}
+		
+		if (temp != null)
+		{
+			//output += "CHAR\t" + (int)('\n') +"\n";	
+			
+			lineNumber++;
+		}else
+		{
+			this.EOF = true;
 		}
 		
-		if(verbose)	
-			output += z +"\n";
-		
-		return new TagSet(x, y, z);
+		return temp;
 	}
-
+	
 	public String analyise(){
-		try{
+		lineNumber 	= 0;
+		errorCount 	= 0;
 		
-			while ((buffer = input.readLine()) != null)
+		try{
+			buffer = input.readLine();
+			
+			while (!EOF && buffer != null)
 			{
 				lineNumber++;
 				
-				// For each line:
-				while (buffer != null && buffer.length() > 0)
-					tags.add(nextTag());
-				
-				if(verbose)	
+				if(verbose && lineNumber > 1)	
 					output += "CHAR\t" + (int)('\n') +"\n";	
-			}
 			
+				// For each line:
+				while (!buffer.equals(""))
+					tags.add(nextTag(buffer));
+				
+				buffer = input.readLine();
+			}
+	
 			if(verbose)	
 				output += "END" +"\n";
 			else
 				output +=  "\n";
 		
 		}catch(IOException e){
-			error("ERROR: in line("+lineNumber+"):"+e.getMessage());
+			error(e.getMessage());
 		}
 		
 		return output;
 	}
+	
+	public void basicAnalyise()
+	{
+		int cur = -1;
+		
+		try{
+			cur = input.read();
+	
+			while (cur != -1){
+				
+				char c = (char)cur;
+				
+				switch (c){
+					case '<':
+						
+						checkEnd = input.read();
+						
+						// BEGIN tags
+						if (checkEnd != -1 && ((char)checkEnd) != '/')
+						{
+							getNextTag("BEGIN");
+						}else
+						{
+							// End tags
+							getNextTag("END");
+						}
+						break;
+					
+					default:
+						nonTags += (char)cur;
+						output += "CHAR\t" + cur + "\n";				
+				}
+				
+				cur = input.read();
+			}
+			
+		}catch(IOException e){System.out.println(e.getMessage());}
+		
+		output += "END\n";
+	}
+	
+	public String getNextTag(String type){
+		int cur = -1;
+		char c = '\0';
+		
+		String tagName = "";
+		
+		if ((char)checkEnd != '/')
+			tagName += (char)checkEnd;
+			
+		try{
+			cur = input.read();
+			
+			boolean tagEnd = false;
+			
+			while (cur != -1 && !tagEnd)
+			{
+				c = (char) cur;
+
+				switch(c)
+				{
+					case '>':
+						output += type + "\t" + tagName + "\n";
+						tagEnd = true;
+						return tagName;
+					default:
+					{
+						tagName += c;
+
+						if (!((c >= 'a' && c <= 'z')||(c >= 'A' && c <= 'Z')))
+							error("tag name contains an illegal character.");
+					}
+				}
+				
+				cur = input.read();
+			}
+		}catch(IOException e){System.out.println(e.getMessage());}
+		return tagName;
+	}
 
 	public void error(String message){
-		System.out.println(message);
+		errorCount++;
+		System.out.println("ERROR: in line("+lineNumber+"): "+ message);
+	}
+	
+	public void error(){
+		switch(errorCode)
+		{
+		case 1:
+			error("tag names should not have digits.");
+			break;
+			
+		default:
+			
+		}
 	}
 }
 
@@ -267,11 +417,19 @@ public class MiniXML {
 			MiniXMLex lex = new MiniXMLex(input);
 			
 			System.out.println("\n======== LEX ANALYSIS ========"  );
-				System.out.print(lex.analyise());
+			
+			//System.out.print(lex.analyise());
+			lex.basicAnalyise();
+			System.out.print(lex.output);
+			
 			System.out.println(  "==============================\n");
+			
+			System.out.println(lex.nonTags);
 			
 			if (lex.errorCount > 0)
 				System.out.println("Found ("+lex.errorCount+") errors.");
+			else
+				System.out.println("ALL OK.");
 						
 			input.close();
 		}catch(IOException e){
